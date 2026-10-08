@@ -3,14 +3,16 @@ from PIL import Image, ImageStat
 import streamlit as st
 
 # ---------------------------------------------------------
-# 1. 화면 설정 및 CSS 연결
+# 1. 페이지 기본 설정 및 분리된 CSS 불러오기
 # ---------------------------------------------------------
 st.set_page_config(
-    page_title="도로 위험 요소 관제 장부",
+    page_title="스마트 도로 위험요소 관리 시스템",
+    page_icon="🚨",
     layout="wide",
 )
 
 
+# style.css 파일 로드 함수
 def load_css(file_name):
     if os.path.exists(file_name):
         with open(file_name, "r", encoding="utf-8") as f:
@@ -19,82 +21,46 @@ def load_css(file_name):
 
 load_css("style.css")
 
-# 클래식 입력 창 및 버튼 스타일 커스텀
-st.markdown(
-    """
-    <style>
-    .stButton > button {
-        background-color: #2c221e !important;
-        color: #f5eedf !important;
-        border: 2px solid #1a1310 !important;
-        font-family: 'Gowun Batang', serif !important;
-        font-weight: 700 !important;
-        border-radius: 0px !important;
-        width: 100%;
-        padding: 10px 0px !important;
-        letter-spacing: 1px;
-    }
-    .stButton > button:hover {
-        background-color: #4a3b32 !important;
-        color: #ffffff !important;
-    }
-    .stTextInput > div > div > input {
-        background-color: #f5eedf !important;
-        border: 1px solid #b8a88f !important;
-        color: #2c221e !important;
-        font-family: 'Gowun Batang', serif !important;
-        border-radius: 0px !important;
-    }
-    .stSelectbox > div > div {
-        background-color: #f5eedf !important;
-        border: 1px solid #b8a88f !important;
-        border-radius: 0px !important;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
-
 # ---------------------------------------------------------
-# 2. 고서류 헤더
+# 2. HTML 헤더 출력
 # ---------------------------------------------------------
 st.markdown(
     """
     <div class="app-header">
-        <h1 class="app-title">도로 위험 요소 종합 관제 장부</h1>
-        <p class="app-subtitle">현장 사진 진단 기록 및 조치 관리 일지</p>
+        <h1 class="app-title">🚨 스마트 도로 위험요소 신고 & 관제 시스템</h1>
+        <p class="app-subtitle">도로 사진을 올리면 AI 알고리즘이 위험도를 분석하여 관리자에게 실시간 전달합니다.</p>
     </div>
     """,
     unsafe_allow_html=True,
 )
 
 # ---------------------------------------------------------
-# 3. 데이터 초기화
+# 3. 세션 상태(데이터 저장소) 및 초기화
 # ---------------------------------------------------------
 if "reports" not in st.session_state:
     st.session_state.reports = [
         {
             "id": 1,
             "address": "대구광역시 중구 국채보상로 670",
-            "category": "노면 파손",
+            "category": "🕳️ 포트홀",
             "score": 85,
-            "desc": "노면 함몰 및 깊은 음영 침하 구간이 확인되었습니다.",
-            "status": "긴급 조치 필요",
+            "desc": "이미지 명암 분석 결과, 도로 노면에 깊은 파손 음영이 감지되었습니다.",
+            "status": "긴급 조치 필요 ⚠️",
             "process": "접수 완료",
         },
         {
             "id": 2,
-            "address": "서울특별시 중구 세종대로 110",
-            "category": "도로 균열",
+            "address": "서울시 중구 세종대로 110",
+            "category": "⚡ 도로 균열",
             "score": 60,
-            "desc": "표면 선형 균열이 감지되었습니다.",
-            "status": "주의 진단",
+            "desc": "도로 표면에 불규칙한 선형 균열이 감지되었습니다.",
+            "status": "주의 진단 🟡",
             "process": "보수 공사 중",
         },
     ]
 
 
-# 분석 함수
+# PIL 기본 라이브러리로 도로 위험도를 분석하는 함수
 def analyze_road_hazard(pil_image):
     gray_img = pil_image.convert("L")
     stat = ImageStat.Stat(gray_img)
@@ -109,34 +75,31 @@ def analyze_road_hazard(pil_image):
     score = max(45, min(95, calculated_score))
 
     if score >= 75:
-        category = "노면 파손"
-        desc = f"침하 비율이 높습니다. (어두운 영역: {dark_ratio:.1f}%)"
+        category = "🕳️ 포트홀"
+        desc = f"분석 결과, 도로 내 어두운 파손 영역 비율이 높습니다. (음영 비율: {dark_ratio:.1f}%)"
     elif score >= 55:
-        category = "도로 균열"
-        desc = f"표면 균열 형태가 감지되었습니다. (어두운 영역: {dark_ratio:.1f}%)"
+        category = "⚡ 도로 균열"
+        desc = f"도로 표면에 불규칙한 균열 및 침하 음영이 감지되었습니다. (음영 비율: {dark_ratio:.1f}%)"
     else:
-        category = "경미한 요철"
-        desc = "경미한 노후화 구간입니다."
+        category = "🟡 경미한 요철"
+        desc = "경미한 노후화가 진행 중인 구간입니다."
 
     return category, score, desc
 
 
 # ---------------------------------------------------------
-# 4. 레이아웃
+# 4. 레이아웃 분할 (왼쪽: 업로드 / 오른쪽: 리스트 & 검색)
 # ---------------------------------------------------------
 left_col, right_col = st.columns([1, 1.2], gap="large")
 
 # ---------------------------------------------------------
-# [왼쪽] 접수 양식
+# [LEFT] 이미지 업로드 및 신고 등록
 # ---------------------------------------------------------
 with left_col:
-    st.markdown(
-        '<div class="section-title">신고 접수 양식</div>',
-        unsafe_allow_html=True,
-    )
+    st.markdown("### 📸 도로 위험요소 신고 등록")
 
     uploaded_file = st.file_uploader(
-        "현장 사진 첨부",
+        "포트홀, 균열 등 도로 위험 사진을 올려주세요",
         type=["jpg", "jpeg", "png"],
     )
 
@@ -145,30 +108,34 @@ with left_col:
         uploaded_image = Image.open(uploaded_file)
         st.image(
             uploaded_image,
-            caption="첨부된 현장 사진",
+            caption="업로드한 이미지",
             use_container_width=True,
         )
 
     address_input = st.text_input(
-        "발견 위치",
-        placeholder="주소 또는 정밀 위치를 입력하십시오",
+        "📍 발견 위치 (주소 또는 건물명)",
+        placeholder="예: 대구 중구 중앙대로 397 또는 서울시청 앞",
     )
 
-    if st.button("사진 분석 및 기록 등록"):
+    if st.button(
+        "🚀 위험 요소 분석 및 신고 접수",
+        use_container_width=True,
+        type="primary",
+    ):
         if uploaded_image is None:
-            st.warning("분석할 사진을 첨부하십시오.")
+            st.warning("분석할 도로 위험 사진을 업로드해 주세요.")
         elif not address_input.strip():
-            st.warning("발견 위치를 입력하십시오.")
+            st.warning("위험 지역 위치를 입력해 주세요.")
         else:
-            with st.spinner("사진을 정밀 분석 중입니다..."):
+            with st.spinner("이미지 위험도를 분석 중입니다..."):
                 category, score, desc = analyze_road_hazard(uploaded_image)
 
                 if score >= 75:
-                    status = "긴급 조치 필요"
+                    status = "긴급 조치 필요 ⚠️"
                 elif score >= 55:
-                    status = "주의 진단"
+                    status = "주의 진단 🟡"
                 else:
-                    status = "일반 관찰"
+                    status = "일반 관찰 🟢"
 
                 new_report = {
                     "id": len(st.session_state.reports) + 1,
@@ -181,24 +148,22 @@ with left_col:
                 }
 
                 st.session_state.reports.append(new_report)
-                st.success("관제 장부에 정상 기록되었습니다.")
+                st.success("신고가 성공적으로 완료되었습니다!")
                 st.rerun()
 
 # ---------------------------------------------------------
-# [오른쪽] 관제 장부
+# [RIGHT] 키워드 검색 & 관리자 모드 리스트
 # ---------------------------------------------------------
 with right_col:
-    st.markdown(
-        '<div class="section-title">관제 기록 장부</div>',
-        unsafe_allow_html=True,
-    )
+    st.markdown("### 🔍 위험 지역 및 카테고리 검색")
 
     search_query = st.text_input(
-        "장부 검색",
-        placeholder="지역명 또는 위험 유형 검색",
+        "주소 또는 위험 유형 검색",
+        placeholder="예: 대구, 서울, 포트홀, 균열",
         label_visibility="collapsed",
     ).strip()
 
+    # 검색어로 리스트 필터링
     if search_query:
         filtered_reports = [
             r
@@ -206,16 +171,20 @@ with right_col:
             if search_query.lower() in r["address"].lower()
             or search_query.lower() in r["category"].lower()
         ]
-        st.caption(f"검색된 기록: 총 {len(filtered_reports)}건")
+        st.caption(
+            f"🔎 **'{search_query}'** 검색 결과: 총 **{len(filtered_reports)}건**"
+        )
     else:
         filtered_reports = list(reversed(st.session_state.reports))
 
-    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown("---")
+    st.markdown("### 👷 관리자 모드 (신고 내역 & 상태 변경)")
 
     if not filtered_reports:
-        st.info("해당하는 기록을 찾을 수 없습니다.")
+        st.info("검색 조건에 맞는 신고 내역이 없습니다.")
     else:
         for r in filtered_reports:
+            # 상태에 따른 CSS 클래스 적용
             card_class = (
                 "urgent"
                 if r["score"] >= 75
@@ -227,24 +196,22 @@ with right_col:
                 else ("badge-warning" if r["score"] >= 55 else "badge-normal")
             )
 
-            # 고서류 양식 카드
+            # HTML 구조를 활용하여 style.css의 클래스 적용
             st.markdown(
                 f"""
                 <div class="report-card {card_class}">
-                    <div class="card-header-row">
-                        <div class="card-category">
-                            <span class="badge {badge_class}">{r['process']}</span>
-                            {r['category']}
-                        </div>
-                        <div class="card-score">위험 수치: {r['score']}점</div>
+                    <div class="card-title">
+                        <span class="badge {badge_class}">{r['process']}</span> 
+                        {r['category']} (위험도 {r['score']}점)
                     </div>
-                    <div class="card-meta"><strong>발견 위치</strong> {r['address']}</div>
-                    <div class="card-meta"><strong>진단 소견</strong> {r['desc']}</div>
+                    <div class="card-meta"><b>📍 위치:</b> {r['address']}</div>
+                    <div class="card-meta"><b>📝 AI 진단:</b> {r['desc']}</div>
                 </div>
                 """,
                 unsafe_allow_html=True,
             )
 
+            # 처리 상태 변경 드롭다운
             process_options = ["접수 완료", "보수 공사 중", "조치 완료"]
             current_index = (
                 process_options.index(r["process"])
@@ -253,15 +220,14 @@ with right_col:
             )
 
             selected_status = st.selectbox(
-                f"처리 상태 변경 (기록 번호: {r['id']})",
+                f"🛠️ '{r['address']}' 처리 상태 변경",
                 process_options,
                 index=current_index,
                 key=f"status_select_{r['id']}",
-                label_visibility="collapsed",
             )
 
             if selected_status != r["process"]:
                 r["process"] = selected_status
                 st.rerun()
 
-            st.markdown("<div style='margin-bottom: 18px;'></div>", unsafe_allow_html=True)
+            st.write("")
