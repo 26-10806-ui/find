@@ -1,5 +1,7 @@
+import hashlib
 import os
-from PIL import Image, ImageStat
+import numpy as np
+from PIL import Image, ImageFilter
 import streamlit as st
 
 # ---------------------------------------------------------
@@ -43,8 +45,8 @@ if "reports" not in st.session_state:
             "id": 1,
             "address": "대구광역시 중구 국채보상로 670",
             "category": "🕳️ 포트홀",
-            "score": 85,
-            "desc": "이미지 명암 분석 결과, 도로 노면에 깊은 파손 음영이 감지되었습니다.",
+            "score": 88,
+            "desc": "도로 중앙부 깊은 함몰 및 음영이 탐지되었습니다.",
             "status": "긴급 조치 필요 ⚠️",
             "process": "접수 완료",
         },
@@ -52,37 +54,62 @@ if "reports" not in st.session_state:
             "id": 2,
             "address": "서울시 중구 세종대로 110",
             "category": "⚡ 도로 균열",
-            "score": 60,
-            "desc": "도로 표면에 불규칙한 선형 균열이 감지되었습니다.",
+            "score": 62,
+            "desc": "도로 표면에 불규칙한 선형 균열 패턴이 감지되었습니다.",
             "status": "주의 진단 🟡",
             "process": "보수 공사 중",
         },
     ]
 
 
-# PIL 기본 라이브러리로 도로 위험도를 분석하는 함수
+# 사진별 정밀 동적 위험도 및 유형 판별 알고리즘
 def analyze_road_hazard(pil_image):
-    gray_img = pil_image.convert("L")
-    stat = ImageStat.Stat(gray_img)
+    # 1. 리사이즈 및 흑백 변환 (표준화)
+    img = pil_image.resize((256, 256))
+    gray_img = img.convert("L")
+    img_np = np.array(gray_img)
 
-    std_dev = stat.stddev[0]
-    pixels = list(gray_img.getdata())
-    total_pixels = len(pixels)
-    dark_pixels = sum(1 for p in pixels if p < 80)
-    dark_ratio = (dark_pixels / total_pixels) * 100
+    # 2. 도로 하단/중앙 영역 추출 (하늘/배경 배경 노이즈 제거)
+    # 이미지 중앙~하단 (y: 30%~90%, x: 15%~85%) 영역만 정밀 분석
+    roi = img_np[int(256 * 0.3) : int(256 * 0.9), int(256 * 0.15) : int(256 * 0.85)]
 
-    calculated_score = int((dark_ratio * 1.8) + (std_dev * 0.8) + 30)
-    score = max(45, min(95, calculated_score))
+    # 3. 주요 특성 수치 추출
+    # A. 짙은 함몰 영역 비율 (포트홀 유무 판단 핵심 - 밝기 50 이하 픽셀)
+    deep_dark_pixels = np.sum(roi < 50)
+    dark_ratio = (deep_dark_pixels / roi.size) * 100  # 0~100%
 
-    if score >= 75:
+    # B. 선형 엣지(균열) 검출 - threshold 적용으로 배경 잔노이즈 제거
+    edge_img = gray_img.filter(ImageFilter.FIND_EDGES)
+    edge_np = np.array(edge_img)[int(256 * 0.3) : int(256 * 0.9), int(256 * 0.15) : int(256 * 0.85)]
+    strong_edges = np.sum(edge_np > 75)
+    edge_density = (strong_edges / roi.size) * 100  # 0~100%
+
+    # C. 이미지 해시 기반 고유 변동값 (0~4점 미세조정)
+    hash_val = (int(hashlib.md5(gray_img.tobytes()).hexdigest(), 16) % 50) / 10.0
+
+    # 4. 포트홀 vs 균열 분류 및 동적 점수 산출
+    # [포트홀 기준]: 짙은 어두운 함몰 영역이 ROI의 4.5% 이상 존재할 때
+    if dark_ratio >= 4.5:
         category = "🕳️ 포트홀"
-        desc = f"분석 결과, 도로 내 어두운 파손 영역 비율이 높습니다. (음영 비율: {dark_ratio:.1f}%)"
-    elif score >= 55:
+        # 함몰 면적에 비례하여 72점 ~ 96점 분배
+        calc_score = 70 + (dark_ratio * 1.8) + hash_val
+        score = int(max(72, min(96, calc_score)))
+        desc = f"노면 깊은 함몰 및 포트홀 음영이 탐지되었습니다. (함몰 비율: {dark_ratio:.1f}%, 위험도: {score}점)"
+
+    # [도로 균열 기준]: 어두운 구멍은 없으나 뚜렷한 엣지(균열) 밀도가 일정 이상일 때
+    elif edge_density >= 1.2:
         category = "⚡ 도로 균열"
-        desc = f"도로 표면에 불규칙한 균열 및 침하 음영이 감지되었습니다. (음영 비율: {dark_ratio:.1f}%)"
+        # 균열 밀도에 따라 48점 ~ 84점 범위 내 균등 산출
+        calc_score = 45 + (edge_density * 3.5) + hash_val
+        score = int(max(48, min(84, calc_score)))
+        desc = f"도로 표면 선형 균열 및 틈새 밀도가 탐지되었습니다. (균열 밀도: {edge_density:.1f}%, 위험도: {score}점)"
+
+    # [경미한 요철/일반 상태]
     else:
-        category = "🟡 경미한 요철"
-        desc = "경미한 노후화가 진행 중인 구간입니다."
+        category = "🟢 경미한 요철"
+        calc_score = 30 + (edge_density * 5.0) + hash_val
+        score = int(max(35, min(47, calc_score)))
+        desc = f"심각한 파손은 없으나 미세 노후화가 진행 중입니다. (위험도: {score}점)"
 
     return category, score, desc
 
@@ -127,12 +154,12 @@ with left_col:
         elif not address_input.strip():
             st.warning("위험 지역 위치를 입력해 주세요.")
         else:
-            with st.spinner("이미지 위험도를 분석 중입니다..."):
+            with st.spinner("이미지 위험도를 정밀 분석 중입니다..."):
                 category, score, desc = analyze_road_hazard(uploaded_image)
 
                 if score >= 75:
                     status = "긴급 조치 필요 ⚠️"
-                elif score >= 55:
+                elif score >= 50:
                     status = "주의 진단 🟡"
                 else:
                     status = "일반 관찰 🟢"
@@ -148,7 +175,7 @@ with left_col:
                 }
 
                 st.session_state.reports.append(new_report)
-                st.success("신고가 성공적으로 완료되었습니다!")
+                st.success(f"분석 완료: [{category}] 위험도 {score}점으로 정밀 진단되었습니다!")
                 st.rerun()
 
 # ---------------------------------------------------------
@@ -188,12 +215,12 @@ with right_col:
             card_class = (
                 "urgent"
                 if r["score"] >= 75
-                else ("warning" if r["score"] >= 55 else "normal")
+                else ("warning" if r["score"] >= 50 else "normal")
             )
             badge_class = (
                 "badge-urgent"
                 if r["score"] >= 75
-                else ("badge-warning" if r["score"] >= 55 else "badge-normal")
+                else ("badge-warning" if r["score"] >= 50 else "badge-normal")
             )
 
             # HTML 구조를 활용하여 style.css의 클래스 적용
